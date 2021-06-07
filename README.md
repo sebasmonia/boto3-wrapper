@@ -1,8 +1,8 @@
 # boto3-wrapper
 
-**NOT MEANT FOR PRODUCTIONS USE**
+**NOT MEANT FOR PRODUCTION USE**
 
-A bunch of functions that wrap AWS' Boto3. Uses https://github.com/bendudson/py4cl/ to communicate with boto3 via a Python inferior process.
+A bunch of functions that wrap AWS Boto3. Uses https://github.com/bendudson/py4cl/ to communicate with boto3 via a Python inferior process.
 
 Why?
 
@@ -10,12 +10,12 @@ Why?
 * There isn't a CL SDK for AWS, and writing one is tempting but too big a project
 * I could try to consume the low level APIs instead of boto3, but that adds a lot of complexity
   * Using boto3 via py4cl is much simpler, but it does pay a performance penalty
-  * The perf penalty is way less than leaving Emacs and opening the AWS console to check things :)
-* Mayyyybe this code can be useful to other people working with AWS. The building blocks are in place to consume more services.
+  * The perf penalty is way less than leaving Emacs and opening the AWS web console to check things :)
+* Mayyyybe this code can be useful to other people working with AWS. The building blocks are in place to add more services.
 
 ## Usage
 
-After dropping code in a place that Quicklisp can find it, for example `~/common-lisp`:
+After dropping code in a place that Quicklisp can find it, for example `~/quicklisp/local-projects`:
 
 ```common-lisp
 (ql:quickload :boto3-wrapper)
@@ -28,7 +28,7 @@ After dropping code in a place that Quicklisp can find it, for example `~/common
 (b3:lambda-list-functions "service-name")
 ;; Execute a lambda
 (b3-wrapper:lambda-invoke "service-name-function-name" :show-log t)
-;; Get the funtion's environment (env vars, etc):
+;; Get the function's environment (env vars, etc):
 (boto3-wrapper::lambda-get-function-environment "service-name-function-name")
 
 ;; List parameter store values:
