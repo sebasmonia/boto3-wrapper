@@ -53,3 +53,11 @@ Ignores arguments with NIL values."
         (jonathan:*false-value* false)
         (jonathan:*empty-array-value* empty-array ))
     (jonathan:parse json-string :as :alist)))
+
+(defun python-datetime-string (py-object &key (date-only nil))
+  (if (not py-object)
+      "-"
+      (let* ((date-string (py4cl::python-eval py-object ".replace(microsecond=0).isoformat(sep=' ')")))
+        (subseq date-string 0 (if date-only
+                                  10
+                                  19)))))

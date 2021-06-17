@@ -5,16 +5,18 @@
 ;; Add more clients here. Don't forget to initialize them in `set-profile'.
 (defparameter *ssm-client* nil "An SSM client with the current credentials.")
 (defparameter *lambda-client* nil "A Lambda function client with the current credentials.")
+(defparameter *cloudformation-client* nil "A Cloud Formation client with the current credentials.")
 (defparameter *debug-python-calls* nil "Print python method calls details.")
 (defvar *current-profile* nil "A symbol to read the currently assigned profile.")
 
-(defun set-profile (profile-name)
+(defun set-profile (profile-name &optional (region "us-east-1"))
   "Set the PROFILE-NAME for boto3. Something valid from the credentials file."
-    (b3py:setup_default_session :profile_name profile-name)
-    ;; Create clients with the new profile/session
-    (setf *ssm-client* (b3py:client "ssm"))
-    (setf *lambda-client* (b3py:client "lambda"))
-    (setf *current-profile* profile-name))
+  (b3py:setup_default_session :profile_name profile-name :region_name region)
+  ;; Create clients with the new profile/session
+  (setf *ssm-client* (b3py:client "ssm"))
+  (setf *lambda-client* (b3py:client "lambda"))
+  (setf *cloudformation-client* (b3py:client "cloudformation"))
+  (setf *current-profile* profile-name))
 
 (defun ssm-list-parameters (path &optional (recursive t))
   "Return a list of paramaters under PATH, in the format ( key . value ). RECURSIVE is self-explanatory."
@@ -120,8 +122,7 @@ Supports filter by optional QUALIFIER."
 
 (defun lambda-invoke (name-or-arn &key (payload "") (show-log nil))
   "Invoke NAME-OR-ARN, using PAYLOAD. If SHOW-LOG, it prints the execution log."
-  (let* (
-         (arguments `(("FunctionName" . , name-or-arn)
+  (let* ((arguments `(("FunctionName" . , name-or-arn)
                       ("Payload" . ,payload)
                       ("LogType" . "Tail")))
          (raw-output (call-python-method *lambda-client* "invoke"
@@ -135,3 +136,32 @@ Supports filter by optional QUALIFIER."
     (when show-log
       (format t "Execution log:~%~a~%" (cl-base64:base64-string-to-string (gethash "LogResult" raw-output))))
     payload))
+
+(defun cloudf-list-all-stacks (&optional next-token)
+  "List all cloudformation stacks in the environment.
+When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
+This function is insternal, use `cloudf-list-stacks' instead."
+  (let* ((arguments `(("NextToken" . ,next-token)))
+         (response (call-python-method *cloudformation-client*
+                                       "list_stacks"
+                                       :kwargs arguments))
+         (stacks (gethash "StackSummaries" response))
+         (next-marker (gethash "NextMarker" response)))
+    (if next-marker
+        (concatenate 'vector
+                     (cloudf-list-all-stacks next-marker)
+                     stacks)
+        stacks)))
+
+(defun cloudf-list-stacks (&optional name-filter (include-deleted nil))
+  "List all cloudformation stacks, if NAME-FILTER, filter by partial name."
+  (let* ((all-data (cloudf-list-all-stacks))
+         (names-updated-status (loop for ht across all-data
+                                     collect (list :name (gethash "StackName" ht)
+                                                   :updated (python-datetime-string (gethash "LastUpdatedTime" ht))
+                                                   :status (gethash "StackStatus" ht)))))
+    (when name-filter
+      (setf names-updated-status (remove-if-not (lambda (a-plist) (search name-filter (getf a-plist :name))) names-updated-status)))
+    (unless include-deleted
+      (setf names-updated-status (remove-if (lambda (a-plist) (string= "DELETE_COMPLETE" (getf a-plist :status))) names-updated-status)))
+    names-updated-status))
