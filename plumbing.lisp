@@ -48,6 +48,19 @@ Ignores arguments with NIL values."
    (lambda (pair) (member (car pair) keys-to-keep :test 'equal))
    (alexandria:hash-table-alist input-ht)))
 
+(defun convert-aws-output (vector-of-ht keys-to-keep &optional (key-rename nil))
+  "Converts each hashtable in VECTOR-OF-HT to a list of alists. Removes everything not in KEYS-TO-KEEP from each element.
+If KEY-RENAME is provided, it should be an alist were the car is the current key name and
+the cdr is the new key name. In that case KEYS-TO-KEEP should use the new key name."
+  (when key-rename
+    ;; it's easier to add a new ht key and filter later, than to setf the new key value
+    ;; in the output a list.
+    (loop for a-ht across vector-of-ht
+          do (loop for (old . new) in key-rename
+                   do (setf (gethash new a-ht) (gethash old a-ht)))))
+  (loop for a-ht across vector-of-ht
+        collect (hash-table-to-alist-filter a-ht keys-to-keep)))
+
 (defun json-string-to-alist (json-string &key (null :null) (false "False") (empty-array "[]"))
   (let ((jonathan:*null-value* null)
         (jonathan:*false-value* false)

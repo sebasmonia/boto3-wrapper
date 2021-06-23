@@ -18,6 +18,7 @@
    #:lambda-get-function-tags
    #:lambda-get-function-environment
    #:lambda-invoke
-   #:cloudf-list-stacks))
+   #:cloudf-list-stacks
+   #:cloudf-get-stack-resources))
 
 (in-package #:boto3-wrapper)

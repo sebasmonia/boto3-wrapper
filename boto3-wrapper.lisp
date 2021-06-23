@@ -64,7 +64,7 @@ This function is internal, use `ssm-list-parameters' instead."
 (defun lambda-list-all-functions (&optional marker)
   "List all lambda functions published in the environment.
 When MARKER is provided, it means it is a follow up to a paged call.
-This function is insternal, use `lambda-list-functions' instead."
+This function is internal, use `lambda-list-functions' instead."
   (let* ((arguments `(("Marker" . ,marker)))
          ;; if marker is nil it will be removed from the kwargs
          ;; list by `format-kwargs'
@@ -85,7 +85,7 @@ This function is insternal, use `lambda-list-functions' instead."
          (names-only (loop for ht across all-data
                            collect (gethash "FunctionName" ht))))
     (if name-filter
-        (remove-if-not (lambda (name) (search name-filter name :test #'string=)) names-only)
+        (remove-if-not (lambda (name) (search name-filter name :test #'char-equal)) names-only)
         names-only)))
 
 (defun lambda-get-function-details (name-or-arn &optional qualifier)
@@ -140,7 +140,7 @@ Supports filter by optional QUALIFIER."
 (defun cloudf-list-all-stacks (&optional next-token)
   "List all cloudformation stacks in the environment.
 When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
-This function is insternal, use `cloudf-list-stacks' instead."
+This function is internal, use `cloudf-list-stacks' instead."
   (let* ((arguments `(("NextToken" . ,next-token)))
          (response (call-python-method *cloudformation-client*
                                        "list_stacks"
@@ -161,7 +161,42 @@ This function is insternal, use `cloudf-list-stacks' instead."
                                                    :updated (python-datetime-string (gethash "LastUpdatedTime" ht))
                                                    :status (gethash "StackStatus" ht)))))
     (when name-filter
-      (setf names-updated-status (remove-if-not (lambda (a-plist) (search name-filter (getf a-plist :name))) names-updated-status)))
+      (setf names-updated-status (remove-if-not (lambda (a-plist) (search name-filter (getf a-plist :name) :test #'char-equal)) names-updated-status)))
     (unless include-deleted
       (setf names-updated-status (remove-if (lambda (a-plist) (string= "DELETE_COMPLETE" (getf a-plist :status))) names-updated-status)))
     names-updated-status))
+
+(defun cloudf-list-stack-resources (stack-name &optional next-token)
+  "List all resources for STACK-NAME.
+When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
+This function is internal, use `cloudf-get-stack-resources' instead."
+  (let* ((arguments `(("StackName" . ,stack-name)
+                      ("NextToken" . ,next-token)))
+         (response (call-python-method *cloudformation-client*
+                                       "list_stack_resources"
+                                       :kwargs arguments))
+         (resources (gethash "StackResourceSummaries" response))
+         (next-marker (gethash "NextMarker" response)))
+    (if next-marker
+        (concatenate 'vector
+                     (cloudf-list-stack-resources stack-name next-marker)
+                     resources)
+        resources)))
+
+(defun cloudf-get-stack-resources (stack-name &key (type nil) (name nil))
+  "List the resources of STACK-NAME. For deleted stacks, use the stack id.
+Optional keywords TYPE and NAME can be used to filter the output."
+  (let ((all-data (convert-aws-output (cloudf-list-stack-resources stack-name)
+                                      '(:name :arn :type)
+                                      '(("LogicalResourceId" . :name) ("PhysicalResourceId" . :arn) ("ResourceType" . :type)))))
+    ;; apply type filter
+    (when type
+      (setf all-data
+            (remove-if-not (lambda (item) (search type (alexandria:assoc-value item :type) :test #'char-equal)) all-data)))
+    ;; apply name filter
+    ;; I could do both in one pass with mapcar, I guess?
+    (when name
+      (setf all-data
+            (remove-if-not (lambda (item) (search name (alexandria:assoc-value item :name) :test #'char-equal)) all-data)))
+    ;; return the data, after optional filtering applied
+    all-data))
