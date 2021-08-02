@@ -4,6 +4,7 @@
 
 ;; Add more clients here. Don't forget to initialize them in `set-profile'.
 (defparameter *ssm-client* nil "An SSM client with the current credentials.")
+(defparameter *secretsm-client* nil "A Secrets Manager client with the current credentials.")
 (defparameter *lambda-client* nil "A Lambda function client with the current credentials.")
 (defparameter *cloudformation-client* nil "A Cloud Formation client with the current credentials.")
 (defparameter *debug-python-calls* nil "Print python method calls details.")
@@ -16,6 +17,7 @@
   (setf *ssm-client* (b3py:client "ssm"))
   (setf *lambda-client* (b3py:client "lambda"))
   (setf *cloudformation-client* (b3py:client "cloudformation"))
+  (setf *secretsm-client* (b3py:client "secretsmanager"))
   (setf *current-profile* profile-name))
 
 (defun ssm-list-parameters (path &optional (recursive t))
@@ -60,6 +62,38 @@ This function is internal, use `ssm-list-parameters' instead."
                      (ssm-get-parameters path recursive next-token)
                      parameters)
         parameters)))
+
+(defun secretsm-list (&optional name-filter)
+  "List all of secrets, if NAME-FILTER, filter by partial name."
+  (let* ((all-data (secretsm-get-all))
+         (names-only (loop for ht across all-data
+                           collect (gethash "Name" ht))))
+    (if name-filter
+        (remove-if-not (lambda (name) (search name-filter name :test #'char-equal)) names-only)
+        names-only)))
+
+(defun secretsm-get-secret (name)
+  "Return the value of the last version of secret NAME. "
+  (let* ((arguments `(("SecretId" . ,name)))
+         (response (call-python-method *secretsm-client*
+                                       "get_secret_value"
+                                       :kwargs arguments)))
+    (gethash "SecretString" response)))
+
+(defun secretsm-get-all (&optional next-token)
+  "List all secrets. When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
+This function is internal, use `secretsm-list' instead."
+  (let* ((arguments `(("NextToken" . ,next-token)))
+         (response (call-python-method *secretsm-client*
+                                       "list_secrets"
+                                       :kwargs arguments))
+         (secret-list (gethash "SecretList" response))
+         (next-token (gethash "NextToken" response)))
+    (if next-token
+        (concatenate 'vector
+                     (secretsm-get-all next-token)
+                     secret-list)
+        secret-list)))
 
 (defun lambda-list-all-functions (&optional marker)
   "List all lambda functions published in the environment.

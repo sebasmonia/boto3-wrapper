@@ -13,6 +13,8 @@
    #:ssm-list-parameters
    #:ssm-get-parameter
    #:ssm-put-parameter
+   #:secretsm-get-secret
+   #:secretsm-list
    #:lambda-list-functions
    #:lambda-get-function-configuration
    #:lambda-get-function-tags
