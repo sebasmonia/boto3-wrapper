@@ -72,6 +72,15 @@ This function is internal, use `ssm-list-parameters' instead."
         (remove-if-not (lambda (name) (search name-filter name :test #'char-equal)) names-only)
         names-only)))
 
+(defun secretsm-put-secret (name value)
+  "Upsert the parameter under NAME, with VALUE.
+This function does only String secrets, if I ever need binary secrets it
+should be easy to add."
+  (call-python-method *secretsm-client*
+                      "put_secret_value"
+                      :kwargs  `(("SecretId" . ,name)
+                                 ("SecretString" . ,value))))
+
 (defun secretsm-get-secret (name)
   "Return the value of the last version of secret NAME. "
   (let* ((arguments `(("SecretId" . ,name)))

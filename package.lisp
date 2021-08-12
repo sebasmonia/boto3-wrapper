@@ -14,6 +14,7 @@
    #:ssm-get-parameter
    #:ssm-put-parameter
    #:secretsm-get-secret
+   #:secretsm-put-secret
    #:secretsm-list
    #:lambda-list-functions
    #:lambda-get-function-configuration
