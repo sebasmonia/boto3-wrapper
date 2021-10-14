@@ -2,7 +2,7 @@
 
 **NOT MEANT FOR PRODUCTION USE**
 
-A bunch of functions that wrap AWS Boto3. Uses https://github.com/bendudson/py4cl/ to communicate with boto3 via a Python inferior process.
+A bunch of functions that wrap AWS Boto3. Uses https://github.com/bendudson/py4cl/ to communicate with boto3 via a Python inferior process. I extended the code to support explicit `:true` and `:false` and convert numbers to Decimal, so you will need to use [my own py4cl fork](https://github.com/sebasmonia/py4cl) at least for some of the services.
 
 Why?
 
