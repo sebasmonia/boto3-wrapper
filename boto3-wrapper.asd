@@ -10,7 +10,9 @@
                #:uiop
                #:cl-base64
                #:jonathan
+               #:str
                #:py4cl)
   :components ((:file "package")
                (:file "plumbing")
+               (:file "boto3-low-level")
                (:file "boto3-wrapper")))

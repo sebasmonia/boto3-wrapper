@@ -1,28 +1,30 @@
 ;;;; boto3-wrapper.lisp
+;;;; This file contains the functions that are the public interface of the package. Some are
+;;;; straight AWS calls, others consume functions from boto3-low-level.lisp
 
 (in-package #:boto3-wrapper)
 
-;; Add more clients here. Don't forget to initialize them in `set-profile'.
-(defparameter *ssm-client* nil "An SSM client with the current credentials.")
-(defparameter *secretsm-client* nil "A Secrets Manager client with the current credentials.")
-(defparameter *lambda-client* nil "A Lambda function client with the current credentials.")
-(defparameter *cloudformation-client* nil "A Cloud Formation client with the current credentials.")
-(defparameter *debug-python-calls* nil "Print python method calls details.")
-(defvar *current-profile* nil "A symbol to read the currently assigned profile.")
+(defvar *current-profile* nil "The currently assigned profile.")
+(defvar *s3-default-directory*
+  (uiop:native-namestring "~/boto3-wrapper/")
+  "Default directory for S3 operations")
+(defvar *s3-default-bucket* nil "Bucket to use when not specified.")
 
 (defun set-profile (profile-name &optional (region "us-east-1"))
   "Set the PROFILE-NAME for boto3. Something valid from the credentials file."
   (b3py:setup_default_session :profile_name profile-name :region_name region)
   ;; Create clients with the new profile/session
+  (setf *s3-client* (b3py:client "s3"))
   (setf *ssm-client* (b3py:client "ssm"))
   (setf *lambda-client* (b3py:client "lambda"))
   (setf *cloudformation-client* (b3py:client "cloudformation"))
   (setf *secretsm-client* (b3py:client "secretsmanager"))
-  (setf *current-profile* profile-name))
+  (setf *current-profile* profile-name))`
 
 (defun ssm-list-parameters (path &optional (recursive t))
-  "Return a list of paramaters under PATH, in the format ( key . value ). RECURSIVE is self-explanatory."
-  (loop for elem across (ssm-get-parameters path recursive)
+  "Return a list of paramaters under PATH, in the format ( key . value ). RECURSIVE is
+self-explanatory."
+  (loop for elem across (ssm-get-all-parameters path recursive)
         collect (cons (gethash "Name" elem) (gethash "Value" elem))))
 
 (defun ssm-get-parameter (name)
@@ -42,26 +44,6 @@ PARAMETER-TYPE can be String, SecureString or StringList."
     (call-python-method *ssm-client*
                         "put_parameter"
                         :kwargs arguments)))
-
-(defun ssm-get-parameters (path recursive &optional next-token)
-  "Returns the parameters under PATH. RECURSIVE is self-explanatory.
-When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
-This function is internal, use `ssm-list-parameters' instead."
-  (let* ((arguments `(("Path" . ,path)
-                      ("Recursive" . ,(if recursive "True" "False"))
-                      ("NextToken" . ,next-token)))
-         ;; if next-token is nil it will be removed from the kwargs
-         ;; list by `format-kwargs'
-         (response (call-python-method *ssm-client*
-                                       "get_parameters_by_path"
-                                       :kwargs arguments))
-         (parameters (gethash "Parameters" response))
-         (next-token (gethash "NextToken" response)))
-    (if next-token
-        (concatenate 'vector
-                     (ssm-get-parameters path recursive next-token)
-                     parameters)
-        parameters)))
 
 (defun secretsm-list (&optional name-filter)
   "List all of secrets, if NAME-FILTER, filter by partial name."
@@ -89,39 +71,6 @@ should be easy to add."
                                        :kwargs arguments)))
     (gethash "SecretString" response)))
 
-(defun secretsm-get-all (&optional next-token)
-  "List all secrets. When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
-This function is internal, use `secretsm-list' instead."
-  (let* ((arguments `(("NextToken" . ,next-token)))
-         (response (call-python-method *secretsm-client*
-                                       "list_secrets"
-                                       :kwargs arguments))
-         (secret-list (gethash "SecretList" response))
-         (next-token (gethash "NextToken" response)))
-    (if next-token
-        (concatenate 'vector
-                     (secretsm-get-all next-token)
-                     secret-list)
-        secret-list)))
-
-(defun lambda-list-all-functions (&optional marker)
-  "List all lambda functions published in the environment.
-When MARKER is provided, it means it is a follow up to a paged call.
-This function is internal, use `lambda-list-functions' instead."
-  (let* ((arguments `(("Marker" . ,marker)))
-         ;; if marker is nil it will be removed from the kwargs
-         ;; list by `format-kwargs'
-         (response (call-python-method *lambda-client*
-                                       "list_functions"
-                                       :kwargs arguments))
-         (functions (gethash "Functions" response))
-         (next-marker (gethash "NextMarker" response)))
-    (if next-marker
-        (concatenate 'vector
-                     (lambda-list-all-functions next-marker)
-                     functions)
-        functions)))
-
 (defun lambda-list-functions (&optional name-filter)
   "List all lambda functions, if NAME-FILTER, filter by partial name."
   (let* ((all-data (lambda-list-all-functions))
@@ -130,15 +79,6 @@ This function is internal, use `lambda-list-functions' instead."
     (if name-filter
         (remove-if-not (lambda (name) (search name-filter name :test #'char-equal)) names-only)
         names-only)))
-
-(defun lambda-get-function-details (name-or-arn &optional qualifier)
-  "Get details of the lambda NAME-OR-ARN, filter by optional QUALIFIER.
-This is called by all the lambda-get-* functions, it is inneficient but :shrug:"
-  (let* ((arguments `(("FunctionName" . ,name-or-arn)
-                      ("Qualifier" . ,Qualifier))))
-    (call-python-method *lambda-client*
-                        "get_function"
-                        :kwargs arguments)))
 
 (defun lambda-get-function-configuration (name-or-arn &optional qualifier)
   "Gets only the configuration of the lambda NAME-OR-ARN, filter by optional QUALIFIER."
@@ -177,69 +117,116 @@ Supports filter by optional QUALIFIER."
     (when body-json
       (setf (cdr (assoc "body" payload :test 'equal)) (json-string-to-alist body-json)))
     (when show-log
-      (format t "Execution log:~%~a~%" (cl-base64:base64-string-to-string (gethash "LogResult" raw-output))))
+      (format t "Execution log:~%~a~%" (cl-base64:base64-string-to-string
+                                        (gethash "LogResult" raw-output))))
     payload))
-
-(defun cloudf-list-all-stacks (&optional next-token)
-  "List all cloudformation stacks in the environment.
-When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
-This function is internal, use `cloudf-list-stacks' instead."
-  (let* ((arguments `(("NextToken" . ,next-token)))
-         (response (call-python-method *cloudformation-client*
-                                       "list_stacks"
-                                       :kwargs arguments))
-         (stacks (gethash "StackSummaries" response))
-         (next-marker (gethash "NextMarker" response)))
-    (if next-marker
-        (concatenate 'vector
-                     (cloudf-list-all-stacks next-marker)
-                     stacks)
-        stacks)))
 
 (defun cloudf-list-stacks (&optional name-filter (include-deleted nil))
   "List all cloudformation stacks, if NAME-FILTER, filter by partial name."
   (let* ((all-data (cloudf-list-all-stacks))
          (names-updated-status (loop for ht across all-data
                                      collect (list :name (gethash "StackName" ht)
-                                                   :updated (python-datetime-string (gethash "LastUpdatedTime" ht))
+                                                   :updated (python-datetime-string
+                                                             (gethash "LastUpdatedTime" ht))
                                                    :status (gethash "StackStatus" ht)))))
     (when name-filter
-      (setf names-updated-status (remove-if-not (lambda (a-plist) (search name-filter (getf a-plist :name) :test #'char-equal)) names-updated-status)))
+      (setf names-updated-status (remove-if-not (lambda (a-plist)
+                                                  (search name-filter
+                                                          (getf a-plist :name)
+                                                          :test #'char-equal))
+                                                names-updated-status)))
     (unless include-deleted
-      (setf names-updated-status (remove-if (lambda (a-plist) (string= "DELETE_COMPLETE" (getf a-plist :status))) names-updated-status)))
+      (setf names-updated-status (remove-if (lambda (a-plist)
+                                              (string= "DELETE_COMPLETE"
+                                                       (getf a-plist :status)))
+                                            names-updated-status)))
     names-updated-status))
-
-(defun cloudf-list-stack-resources (stack-name &optional next-token)
-  "List all resources for STACK-NAME.
-When NEXT-TOKEN is provided, it means it is a follow up to a paged call.
-This function is internal, use `cloudf-get-stack-resources' instead."
-  (let* ((arguments `(("StackName" . ,stack-name)
-                      ("NextToken" . ,next-token)))
-         (response (call-python-method *cloudformation-client*
-                                       "list_stack_resources"
-                                       :kwargs arguments))
-         (resources (gethash "StackResourceSummaries" response))
-         (next-marker (gethash "NextMarker" response)))
-    (if next-marker
-        (concatenate 'vector
-                     (cloudf-list-stack-resources stack-name next-marker)
-                     resources)
-        resources)))
 
 (defun cloudf-get-stack-resources (stack-name &key (type nil) (name nil))
   "List the resources of STACK-NAME. For deleted stacks, use the stack id.
 Optional keywords TYPE and NAME can be used to filter the output."
   (let ((all-data (convert-aws-output (cloudf-list-stack-resources stack-name)
                                       '(:name :arn :type)
-                                      '(("LogicalResourceId" . :name) ("PhysicalResourceId" . :arn) ("ResourceType" . :type)))))
+                                      '(("LogicalResourceId" . :name)
+                                        ("PhysicalResourceId" . :arn)
+                                        ("ResourceType" . :type)))))
     ;; apply type filter
     (when type
       (setf all-data
-            (remove-if-not (lambda (item) (search type (alexandria:assoc-value item :type) :test #'char-equal)) all-data)))
+            (remove-if-not (lambda (item) (search type
+                                                  (alexandria:assoc-value item :type)
+                                                  :test #'char-equal))
+                           all-data)))
     ;; apply name filter
     ;; I could do both in one pass with mapcar, I guess?
     (when name
       (setf all-data
-            (remove-if-not (lambda (item) (search name (alexandria:assoc-value item :name) :test #'char-equal)) all-data)))
+            (remove-if-not (lambda (item) (search name
+                                                  (alexandria:assoc-value item :name)
+                                                  :test #'char-equal))
+                           all-data)))
     ;; return the data, after optional filtering applied
     all-data))
+
+(defun s3-list-items (&key (bucket *s3-default-bucket*) prefix name-contains)
+  "Return a list of S3 items in BUCKET. Can specify a PREFIX (sub-dir). Can filter the output with
+NAME-CONTAINS."
+  (alexandria:when-let ((all-objects (s3-list-all-items bucket prefix)))
+    (when name-contains
+      (format t "name-contains")
+      (setf all-objects (remove-if-not (lambda (item) (search name-contains
+                                                              (gethash "Key" item)
+                                                              :test #'char-equal))
+                                       all-objects)))
+    ;; Other props returned: ETag StorageClass Owner
+    (loop for elem across all-objects
+          collect (list (cons :key (gethash "Key" elem))
+                        (cons :last-modified (python-datetime-string
+                                              (gethash "LastModified" elem)))
+                        (cons :size (gethash "Size" elem))))))
+
+(defun s3-list-directories (&key (bucket *s3-default-bucket*) prefix)
+  "Return a list of S3 \"directories\" in BUCKET. Can specify a PREFIX (sub-dir)"
+  (loop for elem across (s3-list-all-directories bucket prefix)
+        collect (gethash "Prefix" elem)))
+
+(defun s3-download (key &key (bucket *s3-default-bucket*) (local-directory *s3-default-directory*)
+                          (preserve-path t))
+  "Download a file from S3 BUCKET, under KEY, to LOCAL-DIRECTORY. If PRESERVE-PATH,
+all the \"sub-directories\" in KEY are mantained, else the file is download to the root of
+LOCAL-DIRECTORY."
+  ;; all the dir manipulation here is non-portable, which I see as a sin but I need this and don't
+  ;; want to spend the time to deal with it now...
+  (let* ((local-path (concatenate 'string local-directory
+                                  (if preserve-path
+                                        key
+                                        (car (last (uiop:split-string key :separator "/")))))))
+    (when preserve-path
+      (ensure-directories-exist local-path))
+    (call-python-method *s3-client*
+                        "download_file"
+                        :kwargs `(("Bucket" . ,bucket)
+                                  ("Key" . ,key)
+                                  ("Filename" . ,local-path)))
+    local-path))
+
+(defun s3-upload (filename &key (bucket *s3-default-bucket*) (path-remove *s3-default-directory*))
+  "Upload FILENAME to an S3 BUCKET. PATH-REMOVE is the portion of the local path that should be
+removed when uploading the file. If you use *s3-default-directory*, you will never need it."
+  (let* ((expanded-filename (uiop:native-namestring filename))
+         (expanded-remove (uiop:native-namestring (or path-remove "")))
+         (object-key (str:replace-first expanded-remove "" expanded-filename) ))
+    (call-python-method *s3-client*
+                        "upload_file"
+                        :positional (list expanded-filename
+                                          bucket
+                                          object-key))
+    object-key))
+
+(defun s3-delete (key &key (bucket *s3-default-bucket*))
+  "Delete KEY from an S3 BUCKET."
+  (gethash "DeleteMarker"
+           (call-python-method *s3-client*
+                               "delete_object"
+                               :kwargs `(("Bucket" . ,bucket)
+                                         ("Key" . , key)))))
