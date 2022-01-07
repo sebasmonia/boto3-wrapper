@@ -26,6 +26,7 @@
    #:lambda-invoke
    #:cloudf-list-stacks
    #:cloudf-get-stack-resources
+   #:s3-list-buckets
    #:s3-list-items
    #:s3-list-directories
    #:s3-download

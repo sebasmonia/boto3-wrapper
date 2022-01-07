@@ -19,7 +19,7 @@
   (setf *lambda-client* (b3py:client "lambda"))
   (setf *cloudformation-client* (b3py:client "cloudformation"))
   (setf *secretsm-client* (b3py:client "secretsmanager"))
-  (setf *current-profile* profile-name))`
+  (setf *current-profile* profile-name))
 
 (defun ssm-list-parameters (path &optional (recursive t))
   "Return a list of paramaters under PATH, in the format ( key . value ). RECURSIVE is
@@ -168,6 +168,19 @@ Optional keywords TYPE and NAME can be used to filter the output."
     ;; return the data, after optional filtering applied
     all-data))
 
+(defun s3-list-buckets (&optional name-filter)
+  "Return a list of S3 buckets that can be accessed. When NAME-FILTER is provided, filter items
+that contain that string in the name."
+  (let ((buckets-lst (loop for bucket across (gethash "Buckets" (call-python-method *s3-client*
+                                                                                "list_buckets"))
+                       collect (gethash "Name" bucket))))
+    (when name-filter
+      (setf buckets-lst (remove-if-not (lambda (bucket-name) (search name-filter
+                                                                     bucket-name
+                                                                     :test #'char-equal))
+                                       buckets-lst)))
+    buckets-lst))
+
 (defun s3-list-items (&key (bucket *s3-default-bucket*) prefix name-contains)
   "Return a list of S3 items in BUCKET. Can specify a PREFIX (sub-dir). Can filter the output with
 NAME-CONTAINS."
@@ -187,8 +200,9 @@ NAME-CONTAINS."
 
 (defun s3-list-directories (&key (bucket *s3-default-bucket*) prefix)
   "Return a list of S3 \"directories\" in BUCKET. Can specify a PREFIX (sub-dir)"
-  (loop for elem across (s3-list-all-directories bucket prefix)
-        collect (gethash "Prefix" elem)))
+  (alexandria:when-let ((directories (s3-list-all-directories bucket prefix)))
+    (loop for elem across directories
+          collect (gethash "Prefix" elem))))
 
 (defun s3-download (key &key (bucket *s3-default-bucket*) (local-directory *s3-default-directory*)
                           (preserve-path t))
