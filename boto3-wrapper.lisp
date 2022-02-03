@@ -186,7 +186,6 @@ that contain that string in the name."
 NAME-CONTAINS."
   (alexandria:when-let ((all-objects (s3-list-all-items bucket prefix)))
     (when name-contains
-      (format t "name-contains")
       (setf all-objects (remove-if-not (lambda (item) (search name-contains
                                                               (gethash "Key" item)
                                                               :test #'char-equal))
@@ -244,3 +243,16 @@ removed when uploading the file. If you use *s3-default-directory*, you will nev
                                "delete_object"
                                :kwargs `(("Bucket" . ,bucket)
                                          ("Key" . , key)))))
+
+(defun s3-metadata (key &key (bucket *s3-default-bucket*))
+  "Retrieve the metadata of KEY from an S3 BUCKET."
+  (let ((keys-of-interest '("ContentLength" "ContentType" "Metadata" "VersionId"))
+        (response (call-python-method *s3-client*
+                                      "head_object"
+                                      :kwargs `(("Bucket" . ,bucket)
+                                                ("Key" . , key)))))
+    (list (cons :last-modified (python-datetime-string (gethash "LastModified" response)))
+          (cons :content-type (gethash "ContentType" response))
+          (cons :content-length (gethash "ContentLength" response))
+          (cons :metadata (gethash "Metadata" response))
+          (cons :version-id (gethash "VersionId" response)))))

@@ -31,6 +31,7 @@
    #:s3-list-directories
    #:s3-download
    #:s3-upload
-   #:s3-delete))
+   #:s3-delete
+   #:s3-metadata))
 
 (in-package #:boto3-wrapper)
