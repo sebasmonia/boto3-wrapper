@@ -21,11 +21,15 @@
   (setf *secretsm-client* (b3py:client "secretsmanager"))
   (setf *current-profile* profile-name))
 
-(defun ssm-list-parameters (path &optional (recursive t))
+(defun ssm-list-parameters (path &key (recursive t) (name-filter nil))
   "Return a list of paramaters under PATH, in the format ( key . value ). RECURSIVE is
 self-explanatory."
   (loop for elem across (ssm-get-all-parameters path recursive)
-        collect (cons (gethash "Name" elem) (gethash "Value" elem))))
+        for name = (gethash "Name" elem)
+        for value = (gethash "Value" elem)
+        when (or (not name-filter)
+                 (search name-filter name :test #'char-equal))
+          collect (cons name value)))
 
 (defun ssm-get-parameter (name)
   "Return the value under NAME, in a readable format"
@@ -47,12 +51,11 @@ PARAMETER-TYPE can be String, SecureString or StringList."
 
 (defun secretsm-list (&optional name-filter)
   "List all of secrets, if NAME-FILTER, filter by partial name."
-  (let* ((all-data (secretsm-get-all))
-         (names-only (loop for ht across all-data
-                           collect (gethash "Name" ht))))
-    (if name-filter
-        (remove-if-not (lambda (name) (search name-filter name :test #'char-equal)) names-only)
-        names-only)))
+  (loop for ht across (secretsm-get-all)
+        for name = (gethash "Name" ht)
+        when (or (not name-filter)
+                 (search name-filter name :test #'char-equal))
+          collect name))
 
 (defun secretsm-put-secret (name value)
   "Upsert the parameter under NAME, with VALUE.
@@ -73,12 +76,11 @@ should be easy to add."
 
 (defun lambda-list-functions (&optional name-filter)
   "List all lambda functions, if NAME-FILTER, filter by partial name."
-  (let* ((all-data (lambda-list-all-functions))
-         (names-only (loop for ht across all-data
-                           collect (gethash "FunctionName" ht))))
-    (if name-filter
-        (remove-if-not (lambda (name) (search name-filter name :test #'char-equal)) names-only)
-        names-only)))
+  (loop for ht across (lambda-list-all-functions)
+        for function-name = (gethash "FunctionName" ht)
+        when (or (not name-filter)
+                 (search name-filter function-name :test #'char-equal))
+          collect function-name))
 
 (defun lambda-get-function-configuration (name-or-arn &optional qualifier)
   "Gets only the configuration of the lambda NAME-OR-ARN, filter by optional QUALIFIER."
@@ -171,15 +173,11 @@ Optional keywords TYPE and NAME can be used to filter the output."
 (defun s3-list-buckets (&optional name-filter)
   "Return a list of S3 buckets that can be accessed. When NAME-FILTER is provided, filter items
 that contain that string in the name."
-  (let ((buckets-lst (loop for bucket across (gethash "Buckets" (call-python-method *s3-client*
-                                                                                "list_buckets"))
-                       collect (gethash "Name" bucket))))
-    (when name-filter
-      (setf buckets-lst (remove-if-not (lambda (bucket-name) (search name-filter
-                                                                     bucket-name
-                                                                     :test #'char-equal))
-                                       buckets-lst)))
-    buckets-lst))
+  (loop for bucket across (gethash "Buckets" (call-python-method *s3-client* "list_buckets"))
+        for bucket-name = (gethash "Name" bucket)
+        when (or (not name-filter)
+                 (search name-filter bucket-name :test #'char-equal))
+        collect bucket-name))
 
 (defun s3-list-items (&key (bucket *s3-default-bucket*) prefix name-contains)
   "Return a list of S3 items in BUCKET. Can specify a PREFIX (sub-dir). Can filter the output with
